@@ -64,9 +64,9 @@ def split_equal(mfile):
 def decision_list():
     lst = [{} for i in range(4)]
     lst[0][0] = [0, 3]; lst[0][1] = [0, 1]; lst[0][2] = [1, 2]; lst[0][3] = [2, 3]
-    lst[0][0] = [0, 1]; lst[0][1] = [1, 2]; lst[0][2] = [3, 2]; lst[0][3] = [0, 3]
-    lst[0][0] = [2, 1]; lst[0][1] = [3, 2]; lst[0][2] = [3, 0]; lst[0][3] = [0, 1]
-    lst[0][0] = [2, 3]; lst[0][1] = [3, 0]; lst[0][2] = [1, 0]; lst[0][3] = [2, 1]
+    lst[1][0] = [0, 1]; lst[1][1] = [1, 2]; lst[1][2] = [3, 2]; lst[1][3] = [0, 3]
+    lst[2][0] = [2, 1]; lst[2][1] = [3, 2]; lst[2][2] = [3, 0]; lst[2][3] = [0, 1]
+    lst[3][0] = [2, 3]; lst[3][1] = [3, 0]; lst[3][2] = [1, 0]; lst[3][3] = [2, 1]
     return lst
 
 def user_validity(sockets, user, pwd):
@@ -75,7 +75,7 @@ def user_validity(sockets, user, pwd):
         client_socket.send(user.encode('utf8'))
         sleep(0.05)
         client_socket.send(pwd.encode('utf8'))
-        auth = client_socket.recv(128)
+        auth = client_socket.recv(1024)
         if auth.decode('utf8') == 'valid':
             allowed = True
     return allowed
@@ -88,7 +88,7 @@ def create_socket(server_name, server_ports, usr, pswd):
         client_sockets = [socket.socket(socket.AF_INET, socket.SOCK_STREAM) for server_port in server_ports]
         i = 0
         for server_port in server_ports:
-            client_sockets[i].connect((server_name, server_port))
+            client_sockets[i].connect((server_name, int(server_port)))
             i += 1
         credentials = []
         for client_socket in client_sockets:
@@ -121,16 +121,19 @@ def create_socket(server_name, server_ports, usr, pswd):
                 continue
 
             if func == "-get" or func == "-put":
+                for client_socket in client_sockets:
+                    client_socket.send(func.encode('utf8'))
+                    sleep(0.05)
 
                 valid = user_validity(client_sockets, username, password)
 
                 if valid:
-                    for client_socket in client_sockets:
-                        client_socket.send(func.encode('utf8'))
-                        sleep(0.05)
-                        client_socket.send(file_name.encode('utf8'))
 
                     if func == '-get':
+                        continue
+                        for client_socket in client_sockets:
+                            client_socket.send(file_name.encode('utf8'))
+
                         flag = client_socket.recv(2048)
                         if flag.decode('utf8') == "Found":
                             with open(file_name, 'wb') as file:
@@ -150,37 +153,48 @@ def create_socket(server_name, server_ports, usr, pswd):
 
                     elif func == '-put':
                         try:
-                            with open(file_name, 'rb') as f:
-                                part_number = 0
-                                for part in split_equal(f):
+                            with open(file_name, 'rb') as fil:
+                                part_number = 1
+                                for part in split_equal(fil):
                                     with open('.'+file_name+'.'+str(part_number), 'wb') as newfile:
                                         newfile.write(part)
                                     part_number += 1
 
-                            file_length = os.path.getsize(file_name)
                             decision_value = md5(file_name)
-                            part_length = int(file_length/4)
+                            print(decision_value)
                             upload_value = decision_list()
                             upload_dict = upload_value[decision_value]
-                            line = f.read(32)
-                            sent_count = 0
-                            while line:
-                                #line = do_encrypt(line.ljust(32, b'0'))
-                                i = 0
-                                j = 9
-                                if sent_count >= part_length:
-                                    i += 1
-                                    if j != i:
-                                        j = i
-                                        client_sockets[upload_dict[i][0]].send(str(i+1).encode('utf8'))
-                                        client_sockets[upload_dict[i][1]].send(str(i+1).encode('utf8'))
-                                print("Sending data......")
-                                client_sockets[upload_dict[i][0]].send(line)
-                                client_sockets[upload_dict[i][1]].send(line)
-                                sent_count = sent_count + 32
-                                line = f.read(32)
-                            f.close()
+
+                            for i in range(4):
+                                client_sockets[upload_dict[i][1]].send("%true%".encode('utf8'))
+                                client_sockets[upload_dict[i][0]].send("%true%".encode('utf8'))
+                                part_name = '.'+file_name+'.'+str(i+1)
+                                print(part_name)
+                                sleep(0.05)
+                                client_sockets[upload_dict[i][0]].send(part_name.encode('utf8'))
+                                client_sockets[upload_dict[i][1]].send(part_name.encode('utf8'))
+                                sleep(0.05)
+                                with open(part_name, 'rb') as f:
+                                    line = f.read(64)
+                                    client_sockets[upload_dict[i][1]].send("%BEGIN%".encode('utf8'))
+                                    client_sockets[upload_dict[i][0]].send("%BEGIN%".encode('utf8'))
+                                    while line:
+                                        print("Sending data......")
+                                        client_sockets[upload_dict[i][1]].send(line)
+                                        sleep(0.01)
+                                        client_sockets[upload_dict[i][0]].send(line)
+                                        line = f.read(64)
+                                    client_sockets[upload_dict[i][1]].send("%END%".encode('utf8'))
+                                    client_sockets[upload_dict[i][0]].send("%END%".encode('utf8'))
+                                f.close()
+
+                            for client_socket in client_sockets:
+                                sleep(0.05)
+                                print("sending false")
+                                client_socket.send("%false%".encode('utf8'))
                             print("Done Sending")
+                            for j in range(4):
+                                os.remove('.'+file_name+'.'+str(j+1))
                         except FileNotFoundError:
                             logs.info("File not Found!")
                     else:
@@ -190,6 +204,7 @@ def create_socket(server_name, server_ports, usr, pswd):
                     continue
 
             elif func == "-list" or func == "-exit":
+                continue
                 client_socket.send(func.encode('utf8'))
                 if func == "-list":
                     data = client_socket.recv(2048)
@@ -218,14 +233,14 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     #parser.add_argument("serverIp", help="enter server IP address", type=str)
     parser.add_argument('configfile', help="Enter name of the config file", type=str)
-    parser.add_argument("serverPort", help="Enter port of the server you wish to connect", type=int)
+    parser.add_argument("--serverPorts", help="Enter port of the server you wish to connect", nargs='+', required=True)
     arg = parser.parse_args()
     server_name = '127.0.0.1'
     configfile = arg.configfile
     config.read(configfile)
     user = config['credentials']['username']
     password = config['credentials']['password']
-    server_port = arg.serverPort
+    server_port = arg.serverPorts
     if not validate_ip(server_name):
         logs.info("Invalid IP address")
         sys.exit()
