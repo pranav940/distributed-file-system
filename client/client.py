@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
 # author = Pranav Gummaraj Srinivas prgu6170@colorado.edu
-# date = 27/11/2018
+# date = 11/27/2018
+# name = Datacomm python programming assignment
+# purpose = cient code
 # version = 3.6.5
 
 import socket
@@ -196,8 +198,8 @@ def create_socket(server_name, server_ports, usr, pswd):
                                                     break
                                                 f.write(data)
                                         f.close()
-                                    print("\nSuccessfully transferred part "+str(prt_name))
-                                    sleep(1.5)
+                                    print("\nSuccessfully transferred part "+str(part_num))
+                                    sleep(1)
                                 for act_ser in active_servers:
                                     client_sockets[act_ser].send('%false%'.encode('utf8'))
                                 with open("copy_"+file_name, "w") as outfile:
@@ -206,13 +208,13 @@ def create_socket(server_name, server_ports, usr, pswd):
                                             for line in infile:
                                                 outfile.write(line)
                                 print("File has been saved as copy_"+file_name+" from the servers")
-                                # print(filecmp.cmp("copy_"+file_name, file_name))
+                                print(filecmp.cmp("copy_"+file_name, file_name))
                                 break
                             else:
                                 logs.info("File not complete!")
                                 break
                         else:
-                            logs.info("File not uploaded")
+                            logs.info("File not uploaded by the user")
                             break
 
                     elif func == '-put':
@@ -274,6 +276,7 @@ def create_socket(server_name, server_ports, usr, pswd):
                                         client_sockets[upload_dict[i][0]].send(line)
                                         line = f.read(32)
                                     client_sockets[upload_dict[i][1]].send("%END%".encode('utf8'))
+                                    sleep(0.01)
                                     client_sockets[upload_dict[i][0]].send("%END%".encode('utf8'))
                                 f.close()
 
