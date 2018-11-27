@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 
 # author = Pranav Gummaraj Srinivas prgu6170@colorado.edu
-# date = 09/19/2018
-# name = assignment 5 extra credit
-# purpose = server-client socket programming
+# date = 27/11/2018
 # version = 3.6.5
 
 import socket
