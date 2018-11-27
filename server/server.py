@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
 # author = Pranav Gummaraj Srinivas prgu6170@colorado.edu
-# date = 27/11/2018
+# date = 11/27/2018
+# name = Datacomm python programming assignment
+# purpose = server code
 # version = 3.6.5
 
 import socket
@@ -50,7 +52,7 @@ def user_validity(credential, connection):
     pswd = connection.recv(128)
     if credential[user.decode('utf8')] == pswd.decode('utf8'):
         valid = True
-    return valid
+    return valid, user.decode('utf8')
 
 
 def files(directory, user):
@@ -83,19 +85,19 @@ def create_socket(server_name, server_port, dir, cred):
         while True:
             conn, client_address = server_socket.accept()
             print("Got connection from ", client_address)
-            user = conn.recv(512)
-            user = user.decode('utf8')
+            usr = conn.recv(512)
+            usr = usr.decode('utf8')
             sleep(0.05)
             pas = conn.recv(512)
             pas = pas.decode('utf8')
 
             try:
-                if cred[user] == pas:
+                if cred[usr] == pas:
                     conn.send("valid".encode('utf8'))
                     func = conn.recv(2048)
                     if func.decode('utf8') == "-get" or func.decode('utf8') == "-put":
 
-                        validity = user_validity(cred, conn)
+                        validity, user = user_validity(cred, conn)
 
                         if validity:
                             conn.send('valid'.encode('utf8'))
@@ -168,6 +170,7 @@ def create_socket(server_name, server_port, dir, cred):
                                                     sys.stdout.flush()
                                                     l += 1
                                                     print("\r" + "Receiving data" + "." * (l % 60), end='')
+                                                    #sleep(0.01)
                                                     data = conn.recv(32)
                                                     #data = do_decrypt(data)
                                                     if data.decode('utf8') == "%END%":
