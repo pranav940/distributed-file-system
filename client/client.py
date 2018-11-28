@@ -3,7 +3,7 @@
 # author = Pranav Gummaraj Srinivas prgu6170@colorado.edu
 # date = 11/27/2018
 # name = Datacomm python programming assignment
-# purpose = cient code
+# purpose = client code
 # version = 3.6.5
 
 import socket
@@ -128,7 +128,6 @@ def create_socket(server_name, server_ports, usr, pswd):
             print("-get <filename> <username> <password>")
             print("-put <filename> <username> <password>")
             print("-list <username> <password>")
-            print("-exit: Smoothly exits and free up all sockets")
             inp = input("Please enter your input (in the exact format show):\n")
             ip = inp.split()
             if len(ip) == 1:
@@ -145,28 +144,26 @@ def create_socket(server_name, server_ports, usr, pswd):
             else:
                 logs.info("Invalid command")
                 continue
-
-            if func == "-get" or func == "-put":
-                for ser in range(4):
-                    try:
-                        client_sockets[ser].send(func.encode('utf8'))
-                        sleep(0.05)
-                    except BrokenPipeError:
-                        pass
-
-                valid = user_validity(client_sockets, username, password)
-
-                if valid:
+            active_servers = []
+            for ser in range(4):
+                try:
+                    client_sockets[ser].send(func.encode('utf8'))
+                    active_servers.append(ser)
+                    sleep(0.05)
+                except BrokenPipeError:
+                    pass
+            valid = user_validity(client_sockets, username, password)
+            if valid:
+                if func == "-get" or func == "-put":
 
                     if func == '-get':
-                        active_servers = []
+
                         for ser in range(4):
                             try:
                                 client_sockets[ser].send(file_name.encode('utf8'))
                                 sleep(0.1)
                                 flag = client_sockets[ser].recv(32).decode('utf8')
                                 sleep(0.1)
-                                active_servers.append(ser)
                                 if flag == "found":
                                     dec_value = int(client_sockets[ser].recv(32).decode('utf8'))
                             except BrokenPipeError:
@@ -202,9 +199,9 @@ def create_socket(server_name, server_ports, usr, pswd):
                                     sleep(1)
                                 for act_ser in active_servers:
                                     client_sockets[act_ser].send('%false%'.encode('utf8'))
-                                with open("copy_"+file_name, "w") as outfile:
+                                with open("copy_"+file_name, "wb") as outfile:
                                     for fname in parts:
-                                        with open(fname) as infile:
+                                        with open(fname, 'rb') as infile:
                                             for line in infile:
                                                 outfile.write(line)
                                 print("File has been saved as copy_"+file_name+" from the servers")
@@ -290,29 +287,33 @@ def create_socket(server_name, server_ports, usr, pswd):
                         except FileNotFoundError:
                             logs.info("File not Found!")
                             break
-                    else:
-                        logs.info("Invalid command")
-                        break
-                else:
-                    logs.info("Invalid username or password\nTry again!")
-                    continue
 
-            elif func == "-list" or func == "-exit":
-                continue
-                client_socket.send(func.encode('utf8'))
-                if func == "-list":
-                    data = client_socket.recv(2048)
-                    lst = json.loads(data.decode('utf8'))
-                    list_of_files = lst.get("list")
-                    print('\nListing all files in the directory:')
-                    for item in list_of_files:
-                        print("---->  "+item)
-                else:
-                    client_socket.shutdown(socket.SHUT_RDWR)
-                    print("Shutting down socket")
+                elif func == "-list":
+                    for ser in active_servers:
+                        try:
+                            data = client_sockets[ser].recv(2048)
+                            lst = json.loads(data.decode('utf8'))
+                            list_of_files = lst.get("list")
+                            print('\nListing all files in the directory:')
+                            for item in list_of_files:
+                                req_servers = get_req_servers(active_servers, int(item[1]))
+                                if len(req_servers) == 4:
+                                    print("---->  " + item[0])
+                                else:
+                                    print("---->  " + item[0] + " [INCOMPLETE]")
+                            break
+                        except BrokenPipeError:
+                            pass
+                    else:
+                        logs.info("None of the servers are listening")
                     break
+
+                else:
+                    logs.info("Invalid command")
+                    continue
             else:
-                logs.info("Invalid command")
+                logs.info("Invalid username or password\nTry again!")
+                continue
         else:
             logs.info("Invalid credentials in the .conf file or no server could be reached")
             break
