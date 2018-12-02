@@ -214,7 +214,10 @@ if __name__ == "__main__":
     server_name = "127.0.0.1"
     server_directory = args.server_directory
     server_port = args.serverPort
-    subprocess.call(["mkdir", "-p", "."+server_directory])
+    try:
+        os.mkdir("."+server_directory)
+    except FileExistsError:
+        pass
     if not validate_ip(server_name):
         logs.info("Invalid IP address")
         sys.exit()
