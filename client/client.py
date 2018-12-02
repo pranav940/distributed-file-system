@@ -154,7 +154,7 @@ def create_socket(server_name, server_ports, usr, pswd):
                     pass
             valid = user_validity(client_sockets, username, password)
             if valid:
-                if func == "-get" or func == "-put":
+                if (func == "-get" or func == "-put") and len(ip) == 4:
 
                     if func == '-get':
 
@@ -281,8 +281,8 @@ def create_socket(server_name, server_ports, usr, pswd):
                                 sleep(0.05)
                                 client_socket.send("%false%".encode('utf8'))
                             print("\nDone Sending")
-                            for j in range(4):
-                                os.remove('.'+file_name+'.'+str(j+1))
+                            #for j in range(4):
+                                #os.remove('.'+file_name+'.'+str(j+1))
                             break
                         except FileNotFoundError:
                             logs.info("File not Found!")
