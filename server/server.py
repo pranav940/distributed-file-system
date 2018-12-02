@@ -17,6 +17,7 @@ import subprocess
 import configparser
 from time import sleep
 import csv
+import threading
 
 
 def do_encrypt(message):
@@ -57,23 +58,18 @@ def user_validity(credential, connection):
 
 def files(directory, user):
     file_list = []
-    changed = False
     try:
-        os.chdir('.' + directory + '/' + user)
-        changed = True
-    except OSError:
+        with open('.'+directory+'/'+user+"/"+".filerepository.csv", "r") as f:
+            readCSV = csv.reader(f, delimiter=',')
+            for row in readCSV:
+                if not [row[0], row[1]] in file_list:
+                    file_list.append([row[0], row[1]])
+    except FileNotFoundError:
         return file_list
-    with open(".filerepository.csv", "r") as f:
-        readCSV = csv.reader(f, delimiter=',')
-        for row in readCSV:
-            if not [row[0], row[1]] in file_list:
-                file_list.append([row[0], row[1]])
-    if changed:
-        os.chdir("../../")
     return file_list
 
 
-def create_socket(server_name, server_port, dir, cred):
+def create_socket(server_name, server_port, dr, crd):
     # Define socket
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
@@ -84,122 +80,126 @@ def create_socket(server_name, server_port, dir, cred):
         server_socket.listen(5)
         # Always listening
         while True:
-            conn, client_address = server_socket.accept()
+            connection, client_address = server_socket.accept()
             print("Got connection from ", client_address)
-            usr = conn.recv(512)
-            usr = usr.decode('utf8')
-            sleep(0.05)
-            pas = conn.recv(512)
-            pas = pas.decode('utf8')
-
-            try:
-                if cred[usr] == pas:
-                    conn.send("valid".encode('utf8'))
-                    func = conn.recv(2048)
-                    validity, user = user_validity(cred, conn)
-                    if validity:
-                        conn.send('valid'.encode('utf8'))
-
-                        if func.decode('utf8') == "-get":
-
-                            file_name = conn.recv(256).decode('utf8')
-                            lst = files(dir, user)
-                            for item in lst:
-                                if file_name == item[0]:
-                                    conn.send("found".encode('utf8'))
-                                    sleep(0.2)
-                                    conn.send(item[1].encode('utf8'))
-                                    break
-                            else:
-                                conn.send("notfound".encode('utf8'))
-                                continue
-                            os.chdir('.' + dir + '/' + user)
-                            while True:
-                                listn = conn.recv(32)
-                                if listn.decode('utf8') == "%true%":
-                                    prt_name = conn.recv(32)
-                                    print((prt_name.decode('utf8')))
-                                    try:
-                                        f = open(prt_name.decode('utf8'), 'rb')
-                                        conn.send("%BEGIN%".encode('utf8'))
-                                        sleep(0.05)
-                                        line = f.read(32)
-                                        l = 0
-                                        while line:
-                                            # line = do_encrypt(line.ljust(16, b'0'))
-                                            l += 1
-                                            print("\r" + "Sending data" + "." * (l % 60), end='')
-                                            sys.stdout.flush()
-                                            sleep(0.01)
-                                            conn.send(line)
-                                            line = f.read(32)
-                                        f.close()
-                                        sleep(0.05)
-                                        conn.send("%END%".encode('utf8'))
-                                        print("\nDone Sending")
-                                    except FileNotFoundError:
-                                        logs.info("File not Found!")
-                                else:
-                                    break
-                            os.chdir("../../")
-
-                        elif func.decode('utf8') == "-put":
-                            act_file_name = conn.recv(32).decode('utf8')
-                            decision_value = conn.recv(32).decode('utf8')
-                            try:
-                                os.mkdir('.' + dir + '/' + user)
-                            except FileExistsError:
-                                pass
-                            os.chdir('.' + dir + '/' + user)
-                            with open(".filerepository.csv", "a+") as f:
-                                write = csv.writer(f)
-                                write.writerow([act_file_name, decision_value])
-                            while True:
-                                listen = conn.recv(32)
-                                if listen.decode('utf8') == "%true%":
-                                    file_name = conn.recv(1024)
-                                    print(file_name.decode("utf8"))    #
-                                    # subprocess.call(["mkdir", "-p", "."+dir+'/'+user])
-
-                                    data = conn.recv(32)
-                                    if data.decode('utf8') == "%BEGIN%":
-                                        with open(file_name.decode('utf8'), 'wb') as file:
-                                            l = 0
-                                            while True:
-                                                sys.stdout.flush()
-                                                l += 1
-                                                print("\r" + "Receiving data" + "." * (l % 60), end='')
-                                                #sleep(0.01)
-                                                data = conn.recv(32)
-                                                #data = do_decrypt(data)
-                                                if data.decode('utf8') == "%END%":
-                                                    break
-                                                file.write(data)
-                                        file.close()
-
-                                    print("\nSuccessfully transferred file")
-                                else:
-                                    break
-                            os.chdir("../../")
-
-                        elif func.decode('utf8') == "-list":
-                                list_of_file = files(dir, user)
-                                data = json.dumps({"list": list_of_file})
-                                print("Sending list of files in the directory")
-                                conn.send(data.encode('utf8'))
-                                print("Sent")
-
-                    else:
-                        conn.send('inval'.encode('utf8'))
-
-                else:
-                    conn.send("invalid".encode('utf8'))
-            except KeyError:
-                conn.send("invalid".encode('utf8'))
-            conn.close()
-
+            threading.Thread(target=process_client, args=(connection, dr, crd)).start()
     except OSError:
         logs.info("Port already in use")
+
+
+def process_client(conn, drtctry, cred):
+
+    usr = conn.recv(512)
+    usr = usr.decode('utf8')
+    sleep(0.05)
+    pas = conn.recv(512)
+    pas = pas.decode('utf8')
+
+    try:
+        if cred[usr] == pas:
+            conn.send("valid".encode('utf8'))
+            func = conn.recv(2048)
+            validity, user = user_validity(cred, conn)
+            if validity:
+                conn.send('valid'.encode('utf8'))
+
+                if func.decode('utf8') == "-get":
+
+                    file_name = conn.recv(256).decode('utf8')
+                    lst = files(drtctry, user)
+                    found = False
+                    for item in lst:
+                        if file_name == item[0]:
+                            conn.send("found".encode('utf8'))
+                            sleep(0.2)
+                            conn.send(item[1].encode('utf8'))
+                            found = True
+                            break
+                    else:
+                        conn.send("notfound".encode('utf8'))
+                    if found:
+                        while True:
+                            listn = conn.recv(32)
+                            if listn.decode('utf8') == "%true%":
+                                prt_name = conn.recv(32)
+                                print((prt_name.decode('utf8')))
+                                try:
+                                    f = open('.'+drtctry+'/'+user+'/'+prt_name.decode('utf8'), 'rb')
+                                    conn.send("%BEGIN%".encode('utf8'))
+                                    sleep(0.05)
+                                    line = f.read(32)
+                                    l = 0
+                                    while line:
+                                        # line = do_encrypt(line.ljust(16, b'0'))
+                                        l += 1
+                                        print("\r" + "Sending data" + "." * (l % 60), end='')
+                                        sys.stdout.flush()
+                                        sleep(0.01)
+                                        conn.send(line)
+                                        line = f.read(32)
+                                    f.close()
+                                    sleep(0.05)
+                                    conn.send("%END%".encode('utf8'))
+                                    print("\nDone Sending")
+                                except FileNotFoundError:
+                                    logs.info("File not Found!")
+                            else:
+                                break
+
+                elif func.decode('utf8') == "-put":
+                    act_file_name = conn.recv(32).decode('utf8')
+                    decision_value = conn.recv(32).decode('utf8')
+                    try:
+                        os.mkdir('.' + drtctry + '/' + user)
+                    except FileExistsError:
+                        pass
+                    with open('.'+drtctry+'/'+user+"/"+".filerepository.csv", "a+") as f:
+                        write = csv.writer(f)
+                        write.writerow([act_file_name, decision_value])
+                    while True:
+                        listen = conn.recv(32)
+                        if listen.decode('utf8') == "%true%":
+                            file_name = conn.recv(1024)
+                            print(file_name.decode("utf8"))    #
+                            # subprocess.call(["mkdir", "-p", "."+dir+'/'+user])
+
+                            data = conn.recv(32)
+                            if data.decode('utf8') == "%BEGIN%":
+                                with open('.'+drtctry+'/'+user+'/'+file_name.decode('utf8'), 'wb') as file:
+                                    l = 0
+                                    while True:
+                                        sys.stdout.flush()
+                                        l += 1
+                                        print("\r" + "Receiving data" + "." * (l % 60), end='')
+                                        #sleep(0.01)
+                                        data = conn.recv(32)
+                                        #data = do_decrypt(data)
+                                        if data.decode('utf8') == "%END%":
+                                            break
+                                        file.write(data)
+                                file.close()
+
+                            print("\nSuccessfully transferred file")
+                        else:
+                            break
+
+                elif func.decode('utf8') == "-list":
+                    print(drtctry, user)
+                    list_of_file = files(drtctry, user)
+                    data = json.dumps({"list": list_of_file})
+                    print("Sending list of files in the directory")
+                    print(os.getcwd())
+                    conn.send(data.encode('utf8'))
+                    print("Sent")
+
+            else:
+                conn.send('inval'.encode('utf8'))
+
+        else:
+            conn.send("invalid".encode('utf8'))
+    except KeyError:
+        conn.send("invalid".encode('utf8'))
+    conn.close()
 
 
 if __name__ == "__main__":
