@@ -339,7 +339,12 @@ if __name__ == '__main__':
     config.read(configfile)
     user = config['credentials']['username']
     password = config['credentials']['password']
-    server_port = [10001, 10002, 10003, 10004]
+    server_port = []
+    for (server, address) in config.items('server_list'):
+        port = address.split(":")
+        server_port.append(int(port[1]))
+    #server_port = [10001, 10002, 10003, 10004]
+    print(server_port)
     if not validate_ip(server_name):
         logs.info("Invalid IP address")
         sys.exit()
