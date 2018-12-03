@@ -104,7 +104,7 @@ def process_client(conn, drtctry, cred):
 
                 if func.decode('utf8') == "-get":
 
-                    file_name = conn.recv(256).decode('utf8')
+                    file_name = conn.recv(2048).decode('utf8')
                     lst = files(drtctry, user)
                     found = False
                     for item in lst:
@@ -118,24 +118,23 @@ def process_client(conn, drtctry, cred):
                         conn.send("notfound".encode('utf8'))
                     if found:
                         while True:
-                            listn = conn.recv(32)
+                            listn = conn.recv(2048)
                             if listn.decode('utf8') == "%true%":
-                                prt_name = conn.recv(32)
+                                prt_name = conn.recv(2048)
                                 print((prt_name.decode('utf8')))
                                 try:
                                     f = open('.'+drtctry+'/'+user+'/'+prt_name.decode('utf8'), 'rb')
                                     conn.send("%BEGIN%".encode('utf8'))
                                     sleep(0.05)
-                                    line = f.read(32)
+                                    line = f.read(2048)
                                     l = 0
                                     while line:
-                                        # line = do_encrypt(line.ljust(16, b'0'))
                                         l += 1
                                         print("\r" + "Sending data" + "." * (l % 60), end='')
                                         sys.stdout.flush()
                                         sleep(0.01)
                                         conn.send(line)
-                                        line = f.read(32)
+                                        line = f.read(2048)
                                     f.close()
                                     sleep(0.05)
                                     conn.send("%END%".encode('utf8'))
@@ -146,8 +145,8 @@ def process_client(conn, drtctry, cred):
                                 break
 
                 elif func.decode('utf8') == "-put":
-                    act_file_name = conn.recv(32).decode('utf8')
-                    decision_value = conn.recv(32).decode('utf8')
+                    act_file_name = conn.recv(2048).decode('utf8')
+                    decision_value = conn.recv(2048).decode('utf8')
                     try:
                         os.mkdir('.' + drtctry + '/' + user)
                     except FileExistsError:
@@ -156,11 +155,11 @@ def process_client(conn, drtctry, cred):
                         write = csv.writer(f)
                         write.writerow([act_file_name, decision_value])
                     while True:
-                        listen = conn.recv(32)
+                        listen = conn.recv(2048)
                         if listen.decode('utf8') == "%true%":
-                            file_name = conn.recv(1024)
+                            file_name = conn.recv(2048)
                             print(file_name.decode("utf8"))
-                            data = conn.recv(32)
+                            data = conn.recv(2048)
                             if data.decode('utf8') == "%BEGIN%":
                                 with open('.'+drtctry+'/'+user+'/'+file_name.decode('utf8'), 'wb') as file:
                                     l = 0
@@ -168,10 +167,13 @@ def process_client(conn, drtctry, cred):
                                         sys.stdout.flush()
                                         l += 1
                                         print("\r" + "Receiving data" + "." * (l % 60), end='')
-                                        data = conn.recv(32)
-                                        #data = do_decrypt(data)
-                                        if data.decode('utf8') == "%END%":
-                                            break
+                                        data = conn.recv(2048)
+                                        try:
+                                            if data.decode('utf8') == "%END%":
+                                                break
+                                        except UnicodeDecodeError:
+                                            pass
+
                                         file.write(data)
                                 file.close()
 
@@ -202,7 +204,6 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     logs = logging.getLogger(__name__)
     parser = argparse.ArgumentParser()
-    # parser.add_argument("serverIp", help="enter server IP address", type=str)
     parser.add_argument("server_directory", help="Give directory address of the server", type=str,
                         choices=['/DFS1', "/DFS2", "/DFS3", "/DFS4"])
     parser.add_argument("serverPort", help="Enter port of the server you wish to connect", type=int)
