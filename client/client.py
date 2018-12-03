@@ -17,19 +17,50 @@ import configparser
 import os
 import math
 import hashlib
+import struct
 import filecmp
 
 
-def do_encrypt(message):
-    obj = AES.new('sajfq874ohsdfp9qsajfq874ohsdfp9q', AES.MODE_CBC, '98qwy4thkjhwgpf9')
-    cipher_text = obj.encrypt(message)
-    return cipher_text
+def do_encrypt(fl):
+    key = 'sajfq874ohsdfp9qsajfq874ohsdfp9q'
+    iv = '98qwy4thkjhwgpf9'
+    aes = AES.new(key, AES.MODE_CBC, iv)
+    file_size = os.path.getsize(fl)
+    with open(fl+'.encr', 'wb') as fout:
+        print(struct.pack('<Q', file_size))
+        fout.write(struct.pack('<Q', file_size))
+        with open(fl, "rb") as fin:
+            while True:
+                data = fin.read(2048)
+                n = len(data)
+                if n == 0:
+                    break
+                elif n % 16 != 0:
+                    data += b' ' * (16 - n%16)
+                encrptd_data = aes.encrypt(data)
+                fout.write(encrptd_data)
 
 
-def do_decrypt(ciphertext):
-    obj = AES.new('sajfq874ohsdfp9qsajfq874ohsdfp9q', AES.MODE_CBC, '98qwy4thkjhwgpf9')
-    message = obj.decrypt(ciphertext)
-    return message
+def do_decrypt(encr_fl):
+    key = 'sajfq874ohsdfp9qsajfq874ohsdfp9q'
+    iv = '98qwy4thkjhwgpf9'
+    obj = AES.new(key, AES.MODE_CBC, iv)
+    with open(encr_fl, 'rb') as fin:
+        file_size = struct.unpack('<Q', fin.read(struct.calcsize('<Q')))[0]
+        with open(encr_fl+'_uncr', 'wb') as fout:
+            while True:
+                data = fin.read(2048)
+                n = len(data)
+                if n == 0:
+                    break
+                decrpt = obj.decrypt(data)
+                if file_size < n:
+                    fout.write(decrpt)
+                else:
+                    fout.write(decrpt[:file_size])
+                file_size -= n
+
+
 
 
 def md5(fname):
@@ -178,6 +209,7 @@ def create_socket(server_name, server_ports, usr, pswd):
                                     client_sockets[req_servers[part_num]].send('%true%'.encode('utf8'))
                                     prt_name = "."+file_name+"."+str(part_num)
                                     parts.append(prt_name)
+                                    do_decrypt(prt_name+'.encr')
                                     sleep(0.05)
                                     client_sockets[req_servers[part_num]].send(prt_name.encode('utf8'))
                                     sleep(0.05)
@@ -219,8 +251,10 @@ def create_socket(server_name, server_ports, usr, pswd):
                             with open(file_name, 'rb') as fil:
                                 part_number = 1
                                 for part in split_equal(fil):
-                                    with open('.'+file_name+'.'+str(part_number), 'wb') as newfile:
+                                    pt_name = '.'+file_name+'.'+str(part_number)
+                                    with open(pt_name, 'wb') as newfile:
                                         newfile.write(part)
+                                    do_encrypt(pt_name)
                                     part_number += 1
 
                             decision_value = md5(file_name)
@@ -233,7 +267,6 @@ def create_socket(server_name, server_ports, usr, pswd):
                                     client_sockets[upload_dict[i][0]].send(file_name.encode('utf8'))
                                     sleep(0.05)
                                     client_sockets[upload_dict[i][0]].send(str(decision_value).encode('utf8'))
-
                                 except BrokenPipeError:
                                     logs.info("Server "+str(upload_dict[i][0]+1)+" is not up. Cannot upload the file.")
                                     for j in range(4):
