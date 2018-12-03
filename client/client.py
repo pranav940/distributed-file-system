@@ -27,7 +27,6 @@ def do_encrypt(fl):
     aes = AES.new(key, AES.MODE_CBC, iv)
     file_size = os.path.getsize(fl)
     with open(fl+'.encr', 'wb') as fout:
-        print(struct.pack('<Q', file_size))
         fout.write(struct.pack('<Q', file_size))
         with open(fl, "rb") as fin:
             while True:
@@ -47,14 +46,14 @@ def do_decrypt(encr_fl):
     obj = AES.new(key, AES.MODE_CBC, iv)
     with open(encr_fl, 'rb') as fin:
         file_size = struct.unpack('<Q', fin.read(struct.calcsize('<Q')))[0]
-        with open(encr_fl+'_uncr', 'wb') as fout:
+        with open(encr_fl+'_decrpt', 'wb') as fout:
             while True:
                 data = fin.read(2048)
                 n = len(data)
                 if n == 0:
                     break
                 decrpt = obj.decrypt(data)
-                if file_size < n:
+                if file_size > n:
                     fout.write(decrpt)
                 else:
                     fout.write(decrpt[:file_size])
@@ -193,10 +192,10 @@ def create_socket(server_name, server_ports, usr, pswd):
                             try:
                                 client_sockets[ser].send(file_name.encode('utf8'))
                                 sleep(0.1)
-                                flag = client_sockets[ser].recv(32).decode('utf8')
+                                flag = client_sockets[ser].recv(2048).decode('utf8')
                                 sleep(0.1)
                                 if flag == "found":
-                                    dec_value = int(client_sockets[ser].recv(32).decode('utf8'))
+                                    dec_value = int(client_sockets[ser].recv(2048).decode('utf8'))
                             except BrokenPipeError:
                                 pass
                         if flag == "found":
@@ -208,26 +207,28 @@ def create_socket(server_name, server_ports, usr, pswd):
                                     print("Getting part "+str(part_num)+" from sever "+str(req_servers[part_num]+1))
                                     client_sockets[req_servers[part_num]].send('%true%'.encode('utf8'))
                                     prt_name = "."+file_name+"."+str(part_num)
-                                    parts.append(prt_name)
-                                    do_decrypt(prt_name+'.encr')
+                                    parts.append('.copy_'+prt_name+'_decrpt')
                                     sleep(0.05)
                                     client_sockets[req_servers[part_num]].send(prt_name.encode('utf8'))
                                     sleep(0.05)
                                     data = client_sockets[req_servers[part_num]].recv(32)
                                     if data.decode('utf8') == "%BEGIN%":
-                                        with open(prt_name, "wb") as f:
+                                        with open('.copy_'+prt_name, "wb") as f:
                                             l = 0
                                             while True:
                                                 sys.stdout.flush()
                                                 l += 1
-                                                print("\r"+"Receiving data" + "."*(l%60), end='')
-                                                data = client_sockets[req_servers[part_num]].recv(32)
-                                                # data = do_decrypt(data)
-                                                if data.decode('utf8') == "%END%":
-                                                    break
+                                                print("\r"+"Receiving encrypted data" + "."*(l%60), end='')
+                                                data = client_sockets[req_servers[part_num]].recv(2048)
+                                                try:
+                                                    if data.decode('utf8') == "%END%":
+                                                        break
+                                                except UnicodeDecodeError:
+                                                    pass
                                                 f.write(data)
                                         f.close()
                                     print("\nSuccessfully transferred part "+str(part_num))
+                                    do_decrypt('.copy_'+prt_name)
                                     sleep(1)
                                 for act_ser in active_servers:
                                     client_sockets[act_ser].send('%false%'.encode('utf8'))
@@ -289,22 +290,21 @@ def create_socket(server_name, server_ports, usr, pswd):
                                 client_sockets[upload_dict[i][0]].send(part_name.encode('utf8'))
                                 client_sockets[upload_dict[i][1]].send(part_name.encode('utf8'))
 
-                                with open(part_name, 'rb') as f:
-                                    line = f.read(32)
+                                with open(part_name+'.encr', 'rb') as f:
+                                    line = f.read(2048)
                                     sleep(0.05)
                                     client_sockets[upload_dict[i][1]].send("%BEGIN%".encode('utf8'))
                                     client_sockets[upload_dict[i][0]].send("%BEGIN%".encode('utf8'))
                                     sleep(0.05)
                                     l = 0
                                     while line:
-                                        # line = do_encrypt(line.ljust(16, b'0'))
                                         l += 1
-                                        print("\r" + "Sending data" + "." * (l % 60), end='')
+                                        print("\r" + "Sending encrypted data" + "." * (l % 60), end='')
                                         sys.stdout.flush()
                                         client_sockets[upload_dict[i][1]].send(line)
                                         sleep(0.01)
                                         client_sockets[upload_dict[i][0]].send(line)
-                                        line = f.read(32)
+                                        line = f.read(2048)
                                     client_sockets[upload_dict[i][1]].send("%END%".encode('utf8'))
                                     sleep(0.01)
                                     client_sockets[upload_dict[i][0]].send("%END%".encode('utf8'))
@@ -314,8 +314,6 @@ def create_socket(server_name, server_ports, usr, pswd):
                                 sleep(0.05)
                                 client_socket.send("%false%".encode('utf8'))
                             print("\nDone Sending")
-                            #for j in range(4):
-                                #os.remove('.'+file_name+'.'+str(j+1))
                             break
                         except FileNotFoundError:
                             logs.info("File not Found!")
@@ -363,9 +361,7 @@ if __name__ == '__main__':
     logs = logging.getLogger(__name__)
     config = configparser.ConfigParser()
     parser = argparse.ArgumentParser()
-    #parser.add_argument("serverIp", help="enter server IP address", type=str)
     parser.add_argument('configfile', help="Enter name of the config file", type=str)
-    # parser.add_argument("--serverPorts", help="Enter port of the server you wish to connect", nargs='+', required=True)
     arg = parser.parse_args()
     server_name = '127.0.0.1'
     configfile = arg.configfile
@@ -376,8 +372,6 @@ if __name__ == '__main__':
     for (server, address) in config.items('server_list'):
         port = address.split(":")
         server_port.append(int(port[1]))
-    #server_port = [10001, 10002, 10003, 10004]
-    print(server_port)
     if not validate_ip(server_name):
         logs.info("Invalid IP address")
         sys.exit()
