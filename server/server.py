@@ -13,7 +13,6 @@ import sys
 import os
 import json
 from Crypto.Cipher import AES
-import subprocess
 import configparser
 from time import sleep
 import csv
@@ -160,9 +159,7 @@ def process_client(conn, drtctry, cred):
                         listen = conn.recv(32)
                         if listen.decode('utf8') == "%true%":
                             file_name = conn.recv(1024)
-                            print(file_name.decode("utf8"))    #
-                            # subprocess.call(["mkdir", "-p", "."+dir+'/'+user])
-
+                            print(file_name.decode("utf8"))
                             data = conn.recv(32)
                             if data.decode('utf8') == "%BEGIN%":
                                 with open('.'+drtctry+'/'+user+'/'+file_name.decode('utf8'), 'wb') as file:
@@ -171,7 +168,6 @@ def process_client(conn, drtctry, cred):
                                         sys.stdout.flush()
                                         l += 1
                                         print("\r" + "Receiving data" + "." * (l % 60), end='')
-                                        #sleep(0.01)
                                         data = conn.recv(32)
                                         #data = do_decrypt(data)
                                         if data.decode('utf8') == "%END%":
