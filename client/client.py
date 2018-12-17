@@ -125,20 +125,6 @@ def user_validity(sockets, user, pwd):
     return allowed
 
 
-def get_req_servers(active_serv, value):
-    # Based on md5 value returns a dictionary which gives which part should be obtained from which active server.
-    # helps in traffic optimization
-    dec_list = decision_list()
-    req_dict = dec_list[value]
-    final_dict = {}
-    for part_num in range(4):
-        for serv_num in req_dict[part_num]:
-            if serv_num in active_serv:
-                final_dict[part_num+1] = serv_num
-                break
-    return final_dict
-
-
 def create_socket(server_names, server_ports, usr, pswd):
     # Define the socket
     while True:
@@ -194,19 +180,25 @@ def create_socket(server_names, server_ports, usr, pswd):
                 if valid:
 
                     if func == '-get':
-
+                        flag_list = []
+                        req_servers = {}
                         for ser in range(4):
                             try:
                                 client_sockets[ser].send(file_name.encode('utf8'))
                                 sleep(0.1)
                                 flag = client_sockets[ser].recv(2048).decode('utf8')
+                                flag_list.append(flag)
                                 sleep(0.1)
                                 if flag == "found":
-                                    dec_value = int(client_sockets[ser].recv(2048).decode('utf8'))
+                                    dat = client_sockets[ser].recv(2048).decode('utf8')
+                                    parts = json.loads(dat)
+                                    part_list = parts.get('list')
+                                    for item in part_list:
+                                        if int(item) not in req_servers:
+                                            req_servers[int(item)] = ser
                             except BrokenPipeError:
                                 pass
-                        if flag == "found":
-                            req_servers = get_req_servers(active_servers, dec_value)
+                        if "found" in flag_list:
                             if len(req_servers) == 4:
                                 # creating a list of parts that needs to be combined to create original file
                                 parts = []
@@ -237,8 +229,10 @@ def create_socket(server_names, server_ports, usr, pswd):
                                                 f.write(data)
                                         f.close()
                                     print("\nSuccessfully transferred part "+str(part_num))
+                                    print("\nDecrypting received file...")
                                     do_decrypt('.copy_'+prt_name)  # creating a decrypted file
                                     sleep(1)
+                                print("\nCombining received parts...")
                                 for act_ser in active_servers:
                                     client_sockets[act_ser].send('%false%'.encode('utf8'))
                                 # combine and create a complete decrypted file
@@ -248,13 +242,12 @@ def create_socket(server_names, server_ports, usr, pswd):
                                             for line in infile:
                                                 outfile.write(line)
                                 print("File has been saved as copy_"+file_name+" from the servers")
-                                print(filecmp.cmp("copy_"+file_name, file_name))
                                 break
                             else:
                                 logs.info("File not complete!")
                                 break
                         else:
-                            logs.info("File not uploaded by the user")
+                            logs.info("File could not be found in the servers")
                             break
 
                     elif func == '-put':
@@ -333,25 +326,30 @@ def create_socket(server_names, server_ports, usr, pswd):
                                 break
 
                     elif func == "-list":
+                        final_dict = {}
                         for ser in active_servers:
                             try:
                                 data = client_sockets[ser].recv(2048)
                                 lst = json.loads(data.decode('utf8'))
-                                list_of_files = lst.get("list")
-                                print('\nListing all files in the directory:')
-                                # For each file check availability of servers for each part. If at least one part
-                                # could not be retrieved by available servers it is marked incomplete.
-                                for item in list_of_files:
-                                    req_servers = get_req_servers(active_servers, int(item[1]))
-                                    if len(req_servers) == 4:
-                                        print("---->  " + item[0])
-                                    else:
-                                        print("---->  " + item[0] + " [INCOMPLETE]")
-                                break
+                                for key, value in lst.items():
+                                    if key not in final_dict:
+                                        final_dict[key] = []
+                                    for item in value:
+                                        if item not in final_dict[key]:
+                                            final_dict[key].append(item)
                             except BrokenPipeError:
                                 pass
+
+                        if final_dict:
+                            print('\nListing all files in the directory:')
+                            for key, value in final_dict.items():
+
+                                if len(value) == 4:
+                                    print("---->  " + key)
+                                else:
+                                    print("---->  " + key + " [INCOMPLETE]")
                         else:
-                            logs.info("None of the servers are listening")
+                            logs.info("No file found in the servers")
                         break
 
                     else:
