@@ -9,16 +9,72 @@
 import socket
 import argparse
 import logging
-import sys
-import os
 import json
-import configparser
+import sys
 from time import sleep
-import csv
-import threading
+from Crypto.Cipher import AES
+import configparser
+import os
+import math
+import hashlib
+import struct
+import filecmp
+
+
+def do_encrypt(fl):
+    # creates encrypted version file
+    key = 'sajfq874ohsdfp9qsajfq874ohsdfp9q'
+    iv = '98qwy4thkjhwgpf9'
+    aes = AES.new(key, AES.MODE_CBC, iv)
+    file_size = os.path.getsize(fl)
+    with open(fl+'.encr', 'wb') as fout:
+        fout.write(struct.pack('<Q', file_size))
+        with open(fl, "rb") as fin:
+            while True:
+                data = fin.read(2048)
+                n = len(data)
+                if n == 0:
+                    break
+                elif n % 16 != 0:
+                    data += b' ' * (16 - n%16)
+                encrptd_data = aes.encrypt(data)
+                fout.write(encrptd_data)
+
+
+def do_decrypt(encr_fl):
+    # creates decrypted version of a file
+    key = 'sajfq874ohsdfp9qsajfq874ohsdfp9q'
+    iv = '98qwy4thkjhwgpf9'
+    obj = AES.new(key, AES.MODE_CBC, iv)
+    with open(encr_fl, 'rb') as fin:
+        file_size = struct.unpack('<Q', fin.read(struct.calcsize('<Q')))[0]
+        with open(encr_fl+'_decrpt', 'wb') as fout:
+            while True:
+                data = fin.read(2048)
+                n = len(data)
+                if n == 0:
+                    break
+                decrpt = obj.decrypt(data)
+                if file_size > n:
+                    fout.write(decrpt)
+                else:
+                    fout.write(decrpt[:file_size])
+                file_size -= n
+
+
+def md5(fname):
+    # calculates md5 value of a file and returns mod 4 value of that hash value
+    hash_md5 = hashlib.md5()
+    with open(fname, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hash_md5.update(chunk)
+    md5_value = hash_md5.hexdigest()
+    req_value = int(md5_value, 16) % 4
+    return req_value
 
 
 def validate_ip(address):
+    # validates input IP address
     valid = True
     arr = address.split(".")
     if len(arr) != 4:
@@ -33,188 +89,309 @@ def validate_ip(address):
     return valid
 
 
-def user_validity(credential, connection):
-    # validates username and password against the credentials in the conf file passed
-    valid = False
-    user = connection.recv(128)
-    pswd = connection.recv(128)
-    if credential[user.decode('utf8')] == pswd.decode('utf8'):
-        valid = True
-    return valid, user.decode('utf8')
+def split_equal(mfile):
+    # splits file into 4 equal parts and returns one part at a time
+    content = mfile.read()
+    return (content[i: i + math.ceil(len(content) / 4)] for i in range(0, len(content), math.ceil(len(content) / 4)))
 
 
-def files(directory, user):
-    # read .filerepository.csv stored in a directory and return the list of files stored in that directory
-    file_list = []
-    try:
-        with open('.'+directory+'/'+user+"/"+".filerepository.csv", "r") as f:
-            readCSV = csv.reader(f, delimiter=',')
-            for row in readCSV:
-                if not [row[0], row[1]] in file_list:
-                    file_list.append([row[0], row[1]])
-    except FileNotFoundError:
-        return file_list
-    return file_list
+def decision_list():
+    # Returns a list of dictionaries of lists that tells which part of file should be uploaded to which servers
+    # For example, if md5 value is 2, then 0 (1st) part of file is uploaded to 1 (2nd) and 2 (3rd) server
+    lst = [{} for i in range(4)]
+    lst[0][0] = [3, 0]; lst[0][1] = [0, 1]; lst[0][2] = [1, 2]; lst[0][3] = [2, 3]
+    lst[1][0] = [0, 1]; lst[1][1] = [1, 2]; lst[1][2] = [2, 3]; lst[1][3] = [3, 0]
+    lst[2][0] = [1, 2]; lst[2][1] = [2, 3]; lst[2][2] = [3, 0]; lst[2][3] = [0, 1]
+    lst[3][0] = [2, 3]; lst[3][1] = [3, 0]; lst[3][2] = [0, 1]; lst[3][3] = [1, 2]
+    return lst
 
 
-def create_socket(server_name, server_port, dr, crd):
-    # Define socket
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+def user_validity(sockets, user, pwd):
+    # validates user and password entered against credentials registered with server in dfs.conf file
+    allowed = False
+    for client_socket in sockets:
+        try:
+            client_socket.send(user.encode('utf8'))
+            sleep(0.05)
+            client_socket.send(pwd.encode('utf8'))
+        except BrokenPipeError:
+            pass
+        try:
+            auth = client_socket.recv(1024)
+            if auth.decode('utf8') == 'valid':
+                allowed = True
+        except ConnectionError:
+            pass
+    return allowed
 
-    try:
-        # Server socket should bind to one IP and port it is listening on. This must match with dest port on client
-        server_socket.bind((server_name, server_port))
-        print("Server is ready")
-        server_socket.listen(5)
-        # Always listening
-        while True:
-            connection, client_address = server_socket.accept()
-            print("Got connection from ", client_address)
-            # threading incoming clients
-            threading.Thread(target=process_client, args=(connection, dr, crd)).start()
-    except OSError:
-        logs.info("Port already in use")
 
+def create_socket(server_names, server_ports, usr, pswd):
+    # Define the socket
+    while True:
+        client_sockets = [socket.socket(socket.AF_INET, socket.SOCK_STREAM) for server_port in server_ports]
+        i = 0
+        for server_port in server_ports:
+            try:
+                client_sockets[i].connect((server_names[i], int(server_port)))
+            except ConnectionRefusedError:
+                pass
+            i += 1
+        credentials = []
+        for ser in range(4):
+            try:
+                client_sockets[ser].send(usr.encode('utf8'))
+                sleep(0.05)
+                client_sockets[ser].send(pswd.encode('utf8'))
+            except BrokenPipeError:
+                pass
 
-def process_client(conn, drctry, cred):
+            validity = client_sockets[ser].recv(512)    # if validated by at least one server proceeds further
+            credentials.append(validity.decode('utf8'))
+        if 'valid' in credentials:
+            print("You have the following options:")
+            print("-get <filename> <username> <password>")
+            print("-put <filename> <username> <password>")
+            print("-list <username> <password>")
+            inp = input("Please enter your input (in the exact format show):\n")
+            ip = inp.split()
+            if len(ip) == 3:
+                func = ip[0]
+                username = ip[1]
+                password = ip[2]
+            elif len(ip) == 4:
+                func = ip[0]
+                file_name = ip[1]
+                username = ip[2]
+                password = ip[3]
+            else:
+                logs.info("Invalid command")
+                continue
+            active_servers = []
+            for ser in range(4):
+                try:
+                    client_sockets[ser].send(func.encode('utf8'))
+                    active_servers.append(ser)   # appending server that is active to a list
+                    sleep(0.05)
+                except BrokenPipeError:
+                    pass
+            if (len(ip) == 4 and (func == "-get" or func == "-put")) or (len(ip) == 3 and func == "-list"):
+                # validate user and password entered in the command
+                valid = user_validity(client_sockets, username, password)
+                if valid:
 
-    usr = conn.recv(512)     # username in dfc file
-    usr = usr.decode('utf8')
-    sleep(0.05)
-    pas = conn.recv(512)    # password in dfc file
-    pas = pas.decode('utf8')
-
-    try:
-        if cred[usr] == pas:     # validating user and password in dfc.conf file
-            conn.send("valid".encode('utf8'))
-            func = conn.recv(2048)
-            validity, user = user_validity(cred, conn)    # validating username and password entered along with get, put or list
-            if validity:
-                conn.send('valid'.encode('utf8'))
-
-                if func.decode('utf8') == "-get":
-
-                    file_name = conn.recv(2048).decode('utf8')
-                    lst = files(drctry, user)    # returns list of files uploaded by the user
-                    found = False
-                    for item in lst:
-                        if file_name == item[0]:
-                            conn.send("found".encode('utf8'))
-                            sleep(0.2)
-                            conn.send(item[1].encode('utf8'))
-                            found = True
-                            break
-                    else:
-                        conn.send("notfound".encode('utf8'))
-                    if found:
-                        while True:
-                            listn = conn.recv(2048)
-                            if listn.decode('utf8') == "%true%":
-                                prt_name = conn.recv(2048)
-                                print((prt_name.decode('utf8')))
-                                try:
-                                    f = open('.' + drctry + '/' + user + '/' + prt_name.decode('utf8'), 'rb')
-                                    conn.send("%BEGIN%".encode('utf8'))
+                    if func == '-get':
+                        flag_list = []
+                        req_servers = {}
+                        for ser in range(4):
+                            try:
+                                client_sockets[ser].send(file_name.encode('utf8'))
+                                sleep(0.1)
+                                flag = client_sockets[ser].recv(2048).decode('utf8')
+                                flag_list.append(flag)
+                                sleep(0.1)
+                                if flag == "found":
+                                    dat = client_sockets[ser].recv(2048).decode('utf8')
+                                    parts = json.loads(dat)
+                                    part_list = parts.get('list')
+                                    for item in part_list:
+                                        if int(item) not in req_servers:
+                                            req_servers[int(item)] = ser
+                            except BrokenPipeError:
+                                pass
+                        if "found" in flag_list:
+                            if len(req_servers) == 4:
+                                # creating a list of parts that needs to be combined to create original file
+                                parts = []
+                                print("Active servers are: ", list(map(lambda x: x+1, active_servers)))
+                                # upload each part to respective servers given by get_req_servers()
+                                for part_num in range(1, 5):
+                                    print("Getting part "+str(part_num)+" from sever "+str(req_servers[part_num]+1))
+                                    client_sockets[req_servers[part_num]].send('%true%'.encode('utf8'))
+                                    prt_name = "."+file_name+"."+str(part_num)
+                                    parts.append('.copy_'+prt_name+'_decrpt')
                                     sleep(0.05)
-                                    line = f.read(2048)
-                                    l = 0
-                                    while line:     # if found, starts sending data to the client
-                                        l += 1
-                                        print("\r" + "Sending data" + "." * (l % 60), end='')
-                                        sys.stdout.flush()
-                                        sleep(0.01)
-                                        conn.send(line)
-                                        line = f.read(2048)
-                                    f.close()
+                                    client_sockets[req_servers[part_num]].send(prt_name.encode('utf8'))
                                     sleep(0.05)
-                                    conn.send("%END%".encode('utf8'))
-                                    print("\nDone Sending")
-                                except FileNotFoundError:
-                                    logs.info("File not Found!")
+                                    data = client_sockets[req_servers[part_num]].recv(32)
+                                    if data.decode('utf8') == "%BEGIN%":
+                                        with open('.copy_'+prt_name, "wb") as f:
+                                            l = 0
+                                            while True:
+                                                sys.stdout.flush()
+                                                l += 1
+                                                print("\r"+"Receiving encrypted data" + "."*(l%60), end='')
+                                                data = client_sockets[req_servers[part_num]].recv(2048)
+                                                try:
+                                                    if data.decode('utf8') == "%END%":
+                                                        break
+                                                except UnicodeDecodeError:
+                                                    pass
+                                                f.write(data)
+                                        f.close()
+                                    print("\nSuccessfully transferred part "+str(part_num))
+                                    print("\nDecrypting received file...")
+                                    do_decrypt('.copy_'+prt_name)  # creating a decrypted file
+                                    sleep(1)
+                                print("\nCombining received parts...")
+                                for act_ser in active_servers:
+                                    client_sockets[act_ser].send('%false%'.encode('utf8'))
+                                # combine and create a complete decrypted file
+                                with open("copy_"+file_name, "wb") as outfile:
+                                    for fname in parts:
+                                        with open(fname, 'rb') as infile:
+                                            for line in infile:
+                                                outfile.write(line)
+                                print("File has been saved as copy_"+file_name+" from the servers")
+                                break
                             else:
+                                logs.info("File not complete!")
+                                break
+                        else:
+                            logs.info("File could not be found in the servers")
+                            break
+
+                    elif func == '-put':
+                            try:
+                                with open(file_name, 'rb') as fil:
+                                    part_number = 1
+                                    # create 4 equal parts of files
+                                    for part in split_equal(fil):
+                                        pt_name = '.'+file_name+'.'+str(part_number)
+                                        with open(pt_name, 'wb') as newfile:
+                                            newfile.write(part)
+                                        do_encrypt(pt_name)   # create encrypted version of each file
+                                        part_number += 1
+
+                                decision_value = md5(file_name)
+                                # getting information of which part should be uploaded to which server
+                                upload_value = decision_list()
+                                upload_dict = upload_value[decision_value]
+                                fail = False
+                                for i in range(4):
+                                    sleep(0.05)
+                                    try:
+                                        client_sockets[upload_dict[i][0]].send(file_name.encode('utf8'))
+                                        sleep(0.05)
+                                        client_sockets[upload_dict[i][0]].send(str(decision_value).encode('utf8'))
+                                    except BrokenPipeError:
+                                        logs.info("Server "+str(upload_dict[i][0]+1)+" is not up. Cannot upload the file.")
+                                        for j in range(4):
+                                            try:
+                                                client_sockets[upload_dict[j][0]].send("%false%".encode('utf8'))
+                                            except BrokenPipeError:
+                                                pass
+                                        fail = True
+                                        break
+                                if fail:
+                                    break
+
+                                for i in range(4):
+                                    client_sockets[upload_dict[i][1]].send("%true%".encode('utf8'))
+                                    client_sockets[upload_dict[i][0]].send("%true%".encode('utf8'))
+                                    part_name = '.'+file_name+'.'+str(i+1)
+                                    print("\n"+"Sending "+file_name+" part "+str(i+1)+" to servers "
+                                          +str(upload_dict[i][1]+1)+" and "+str(upload_dict[i][0]+1))
+                                    sleep(0.05)
+                                    client_sockets[upload_dict[i][0]].send(part_name.encode('utf8'))
+                                    client_sockets[upload_dict[i][1]].send(part_name.encode('utf8'))
+
+                                    # sending encrypted parts to respective servers
+                                    with open(part_name+'.encr', 'rb') as f:
+                                        line = f.read(2048)
+                                        sleep(0.05)
+                                        client_sockets[upload_dict[i][1]].send("%BEGIN%".encode('utf8'))
+                                        client_sockets[upload_dict[i][0]].send("%BEGIN%".encode('utf8'))
+                                        sleep(0.05)
+                                        l = 0
+                                        while line:
+                                            l += 1
+                                            print("\r" + "Sending encrypted data" + "." * (l % 60), end='')
+                                            sys.stdout.flush()
+                                            client_sockets[upload_dict[i][1]].send(line)
+                                            sleep(0.01)
+                                            client_sockets[upload_dict[i][0]].send(line)
+                                            line = f.read(2048)
+                                        client_sockets[upload_dict[i][1]].send("%END%".encode('utf8'))
+                                        sleep(0.01)
+                                        client_sockets[upload_dict[i][0]].send("%END%".encode('utf8'))
+                                    f.close()
+
+                                for client_socket in client_sockets:
+                                    sleep(0.05)
+                                    client_socket.send("%false%".encode('utf8'))
+                                print("\nDone Sending")
+                                break
+                            except FileNotFoundError:
+                                logs.info("File not Found!")
                                 break
 
-                elif func.decode('utf8') == "-put":
-                    act_file_name = conn.recv(2048).decode('utf8')
-                    decision_value = conn.recv(2048).decode('utf8')
-                    try:
-                        os.mkdir('.' + drctry + '/' + user)     # creates directory by the name of user
-                    except FileExistsError:
-                        pass
-                    # maintain a file in each directory that contains list of files uploaded and md5 value of the file.
-                    with open('.' + drctry + '/' + user + "/" + ".filerepository.csv", "a+") as f:
-                        write = csv.writer(f)
-                        write.writerow([act_file_name, decision_value])
-                    while True:
-                        listen = conn.recv(2048)
-                        if listen.decode('utf8') == "%true%":
-                            file_name = conn.recv(2048)
-                            print(file_name.decode("utf8"))
-                            data = conn.recv(2048)
-                            if data.decode('utf8') == "%BEGIN%":
-                                with open('.' + drctry + '/' + user + '/' + file_name.decode('utf8'), 'wb') as file:
-                                    l = 0
-                                    # writes data to the file until it receives end of file
-                                    while True:
-                                        sys.stdout.flush()
-                                        l += 1
-                                        print("\r" + "Receiving data" + "." * (l % 60), end='')
-                                        data = conn.recv(2048)
-                                        try:
-                                            if data.decode('utf8') == "%END%":
-                                                break
-                                        except UnicodeDecodeError:
-                                            pass
+                    elif func == "-list":
+                        final_dict = {}
+                        for ser in active_servers:
+                            try:
+                                data = client_sockets[ser].recv(2048)
+                                lst = json.loads(data.decode('utf8'))
+                                for key, value in lst.items():
+                                    if key not in final_dict:
+                                        final_dict[key] = []
+                                    for item in value:
+                                        if item not in final_dict[key]:
+                                            final_dict[key].append(item)
+                            except BrokenPipeError:
+                                pass
 
-                                        file.write(data)
-                                file.close()
+                        if final_dict:
+                            print('\nListing all files in the directory:')
+                            for key, value in final_dict.items():
 
-                            print("\nSuccessfully transferred file")
+                                if len(value) == 4:
+                                    print("---->  " + key)
+                                else:
+                                    print("---->  " + key + " [INCOMPLETE]")
                         else:
-                            break
+                            logs.info("No file found in the servers")
+                        break
 
-                elif func.decode('utf8') == "-list":
-                    print(drctry, user)
-                    # reads .filerepository.csv file saved in the respective folder to get a list of files.
-                    list_of_file = files(drctry, user)
-                    data = json.dumps({"list": list_of_file})
-                    print("Sending list of files in the directory")
-                    print(os.getcwd())
-                    conn.send(data.encode('utf8'))    # sends the list to a client.
-                    print("Sent")
-
+                    else:
+                        logs.info("Invalid command")
+                        continue
+                else:
+                    logs.info("Invalid username or password\nTry again!")
+                    continue
             else:
-                conn.send('inval'.encode('utf8'))
-
+                logs.info("Invalid command")
+                continue
         else:
-            conn.send("invalid".encode('utf8'))
-    except KeyError:
-        conn.send("invalid".encode('utf8'))
-    conn.close()
+            logs.info("Invalid credentials in the .conf file or no server could be reached")
+            break
+    for client_socket in client_sockets:
+        try:
+            client_socket.close()
+        except BrokenPipeError:
+            pass
+    print('Connection closed')
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     logs = logging.getLogger(__name__)
-    parser = argparse.ArgumentParser()
-    parser.add_argument("server_directory", help="Give directory address of the server", type=str,
-                        choices=['/DFS1', "/DFS2", "/DFS3", "/DFS4"])
-    parser.add_argument("serverPort", help="Enter port of the server you wish to connect", type=int)
-    args = parser.parse_args()
-    server_name = "127.0.0.1"
-    server_directory = args.server_directory
-    server_port = args.serverPort
-    try:
-        os.mkdir("."+server_directory)     # creates a directory with the username
-    except FileExistsError:
-        pass
-    if not validate_ip(server_name):
-        logs.info("Invalid IP address")
-        sys.exit()
     config = configparser.ConfigParser()
-    config.read('dfs.conf')    # reads dfs.conf file which has valid user names and passwords
-    cred = config['credentials']
+    parser = argparse.ArgumentParser()
+    parser.add_argument('configfile', help="Enter name of the config file", type=str)
+    arg = parser.parse_args()
+    configfile = arg.configfile
+    config.read(configfile)
+    user = config['credentials']['username']
+    password = config['credentials']['password']
+    server_port = []
+    server_names = []
+    for (server, address) in config.items('server_list'):
+        port = address.split(":")
+        server_port.append(int(port[1]))
+        server_names.append(port[0])
+    for server_name in server_names:
+        if not validate_ip(server_name):
+            logs.info("Invalid IP address")
+            sys.exit()
 
-    create_socket(server_name, server_port, server_directory, cred)
-
-
+    create_socket(server_names, server_port, user, password)
